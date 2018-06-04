@@ -197,12 +197,28 @@ func cacheHandler(cache *diskcache.Cache) http.Handler {
 			if requestingType != TYPE_CAS {
 				hash = ""
 			}
-			err := cache.Put(r.URL.Path, r.Body, hash)
+			err := cache.Put(r.URL.Path, r.Body, hash, r.ContentLength)
 			if err != nil {
 				logger.WithError(err).Errorf("Failed to put: %v", r.URL.Path)
 				http.Error(w, "failed to put in cache", http.StatusInternalServerError)
 				return
 			}
+
+		case http.MethodHead:
+			ok, err := cache.Contains(r.URL.Path)
+			if err != nil {
+				logger.WithError(err).Errorf("HEAD %s", r.URL.Path)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			if !ok {
+				http.Error(w, "Not found", http.StatusNotFound)
+				logger.Errorf("Not found in cache: %d", http.StatusNotFound)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
 
 		// handle unsupported methods...
 		default:

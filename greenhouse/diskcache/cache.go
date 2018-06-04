@@ -32,7 +32,17 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"sync"
+	"sort"
+	"github.com/djherbis/atime"
 )
+
+// ErrTooBig is returned by Cache::Put when when the item size is bigger than the
+// cache size limit.
+type ErrTooBig struct{}
+
+func (e *ErrTooBig) Error() string {
+	return "item bigger than the cache size limit"
+}
 
 // lruItem is the type of the values stored in SizedLRU to keep track of items.
 // It implements the SizedItem interface.
@@ -76,11 +86,14 @@ func NewCache(diskRoot string) *Cache {
 		}
 	}
 
-	return &Cache{
+	cache := &Cache{
 		diskRoot: strings.TrimSuffix(diskRoot, string(os.PathListSeparator)),
 		mux: &sync.RWMutex{},
 		lru: NewSizedLRU(5*1024*1024*1024*1024, onEvict),
 	}
+
+	cache.loadExistingFiles()
+	return cache
 }
 
 // KeyToPath converts a cache entry key to a path on disk
@@ -123,7 +136,7 @@ func removeTemp(path string) {
 // Put copies the content reader until the end into the cache at key
 // if contentSHA256 is not "" then the contents will only be stored in the
 // cache if the content's hex string SHA256 matches
-func (c *Cache) Put(key string, content io.Reader, contentSHA256 string) error {
+func (c *Cache) Put(key string, content io.Reader, contentSHA256 string, size int64) error {
 	// make sure directory exists
 	path := c.KeyToPath(key)
 	dir := filepath.Dir(path)
@@ -131,6 +144,44 @@ func (c *Cache) Put(key string, content io.Reader, contentSHA256 string) error {
 	if err != nil {
 		logrus.WithError(err).Errorf("error ensuring directory '%s' exists", dir)
 	}
+
+	c.mux.Lock()
+	// If `key` is already in the LRU, don't touch the cache and just discard
+	// the incoming stream. This applies to both committed an uncommitted files
+	// (we don't want to upload again if an upload of the same file is already
+	// in progress).
+	if _, found := c.lru.Get(key); found {
+		c.mux.Unlock()
+		io.Copy(ioutil.Discard, content)
+		logrus.Warningf("key: %s has already been there, not required to store it again.", key)
+		return nil
+	}
+
+	// Try to add the item to the LRU.
+	newItem := &lruItem{
+		size:      size,
+		committed: false,
+	}
+	ok := c.lru.Add(key, newItem)
+	c.mux.Unlock()
+	if !ok {
+		return &ErrTooBig{}
+	}
+
+	// By the time this function exits, we should either mark the LRU item as committed
+	// (if the upload went well), or delete it. Capturing the flag variable is not very nice,
+	// but this stuff is really easy to get wrong without defer().
+	shouldCommit := false
+	defer func() {
+		c.mux.Lock()
+		defer c.mux.Unlock()
+
+		if shouldCommit {
+			newItem.committed = true
+		} else {
+			c.lru.Remove(key)
+		}
+	}()
 
 	// create a temp file to get the content on disk
 	temp, err := ioutil.TempFile(dir, "temp-put")
@@ -174,11 +225,29 @@ func (c *Cache) Put(key string, content io.Reader, contentSHA256 string) error {
 		removeTemp(temp.Name())
 		return fmt.Errorf("failed to insert contents into cache: %v", err)
 	}
+
+	// Only commit if renaming succeeded
+	// This flag is used by the defer() block above.
+	shouldCommit = true
+
 	return nil
 }
 
 // Get provides your readHandler with the contents at key
 func (c *Cache) Get(key string, readHandler ReadHandler) error {
+	ok := func() bool {
+		c.mux.Lock()
+		defer c.mux.Unlock()
+
+		val, found := c.lru.Get(key)
+		// Uncommitted (i.e. uploading items) should be reported as not ok
+		return found && val.(*lruItem).committed
+	}()
+
+	if !ok {
+		return readHandler(ok, nil)
+	}
+
 	path := c.KeyToPath(key)
 	f, err := os.Open(path)
 	if err != nil {
@@ -188,6 +257,14 @@ func (c *Cache) Get(key string, readHandler ReadHandler) error {
 		return fmt.Errorf("failed to get key: %v", err)
 	}
 	return readHandler(true, f)
+}
+
+func (c *Cache) Contains(key string) (ok bool, err error) {
+	c.mux.Lock()
+	defer c.mux.Unlock()
+
+	val, found := c.lru.Get(key)
+	return found && val.(*lruItem).committed, nil
 }
 
 // EntryInfo are returned when getting entries from the cache
@@ -223,4 +300,36 @@ func (c *Cache) GetEntries() []EntryInfo {
 // Delete deletes the file at key
 func (c *Cache) Delete(key string) error {
 	return os.Remove(c.KeyToPath(key))
+}
+
+
+// loadExistingFiles lists all files in the cache directory, and adds them to the
+// LRU index so that they can be served. Files are sorted by access time first,
+// so that the eviction behavior is preserved across server restarts.
+func (c *Cache) loadExistingFiles() {
+	// Walk the directory tree
+	type NameAndInfo struct {
+		info os.FileInfo
+		name string
+	}
+	var files []NameAndInfo
+	filepath.Walk(c.diskRoot, func(name string, info os.FileInfo, err error) error {
+		if !info.IsDir() {
+			files = append(files, NameAndInfo{info, name})
+		}
+		return nil
+	})
+
+	// Sort in increasing order of atime
+	sort.Slice(files, func(i int, j int) bool {
+		return atime.Get(files[i].info).Before(atime.Get(files[j].info))
+	})
+
+	for _, f := range files {
+		key := f.name[len(c.diskRoot)+1:]
+		c.lru.Add(key, &lruItem{
+			size:      f.info.Size(),
+			committed: true,
+		})
+	}
 }
