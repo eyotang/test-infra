@@ -31,7 +31,19 @@ import (
 	"k8s.io/test-infra/greenhouse/diskutil"
 
 	"github.com/sirupsen/logrus"
+	"sync"
 )
+
+// lruItem is the type of the values stored in SizedLRU to keep track of items.
+// It implements the SizedItem interface.
+type lruItem struct {
+	size      int64
+	committed bool
+}
+
+func (i *lruItem) Size() int64 {
+	return i.size
+}
 
 // ReadHandler should be implemeted by cache users for use with Cache.Get
 type ReadHandler func(exists bool, contents io.ReadSeeker) error
@@ -40,13 +52,34 @@ type ReadHandler func(exists bool, contents io.ReadSeeker) error
 type Cache struct {
 	diskRoot string
 	logger   *logrus.Entry
+	mux      *sync.RWMutex
+	lru      SizedLRU
 }
 
 // NewCache returns a new Cache given the root directory that should be used
 // on disk for cache storage
 func NewCache(diskRoot string) *Cache {
+	// Create the directory structure
+	ensureDir(filepath.Join(diskRoot, "cas"))
+	ensureDir(filepath.Join(diskRoot, "ac"))
+	ensureDir(filepath.Join(diskRoot, "build-cache", "android"))
+
+	// The eviction callback deletes the file from disk.
+	onEvict := func(key Key, value SizedItem) {
+		// Only remove committed items (as temporary files have a different filename)
+		if value.(*lruItem).committed {
+			blobPath := filepath.Join(diskRoot, key.(string))
+			err := os.Remove(blobPath)
+			if err != nil {
+				logrus.WithError(err).Error("Remove file %s failed!!!", blobPath)
+			}
+		}
+	}
+
 	return &Cache{
 		diskRoot: strings.TrimSuffix(diskRoot, string(os.PathListSeparator)),
+		mux: &sync.RWMutex{},
+		lru: NewSizedLRU(5*1024*1024*1024*1024, onEvict),
 	}
 }
 
