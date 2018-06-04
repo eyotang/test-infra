@@ -60,6 +60,14 @@ var evictUntilPercentBlocksFree = flag.Float64("evict-until-percent-blocks-free"
 var diskCheckInterval = flag.Duration("disk-check-interval", time.Second*10,
 	"interval between checking disk usage (and potentially evicting entries)")
 
+// global const variables
+const (
+	TYPE_INVALID = 0
+	TYPE_AC = 1
+	TYPE_CAS = 2
+	TYPE_ANDROID = 3
+)
+
 // global metrics object, see prometheus.go
 var promMetrics *prometheusMetrics
 
@@ -126,12 +134,20 @@ func cacheHandler(cache *diskcache.Cache) http.Handler {
 		}
 		hash := parts[len(parts)-1]
 		acOrCAS := parts[len(parts)-2]
-		if acOrCAS != "ac" && acOrCAS != "cas" {
+		if acOrCAS != "ac" && acOrCAS != "cas" && acOrCAS != "android" {
 			logger.Warn("received an invalid request at path")
 			http.Error(w, "invalid location", http.StatusBadRequest)
 			return
 		}
-		requestingAction := acOrCAS == "ac"
+		requestingType := TYPE_INVALID
+		switch acOrCAS {
+		case "ac":
+			requestingType = TYPE_AC
+		case "cas":
+			requestingType = TYPE_CAS
+		case "android":
+			requestingType = TYPE_ANDROID
+		}
 
 		// actually handle request depending on method
 		switch m := r.Method; m {
@@ -147,10 +163,13 @@ func cacheHandler(cache *diskcache.Cache) http.Handler {
 			if err != nil {
 				// file not present
 				if err == errNotFound {
-					if requestingAction {
+					switch requestingType {
+					case TYPE_AC:
 						promMetrics.ActionCacheMisses.Inc()
-					} else {
+					case TYPE_CAS:
 						promMetrics.CASMisses.Inc()
+					case TYPE_ANDROID:
+						promMetrics.AndroidMisses.Inc()
 					}
 					http.Error(w, err.Error(), http.StatusNotFound)
 					return
@@ -161,18 +180,21 @@ func cacheHandler(cache *diskcache.Cache) http.Handler {
 				return
 			}
 			// success, log hit
-			if requestingAction {
+			switch requestingType {
+			case TYPE_AC:
 				promMetrics.ActionCacheHits.Inc()
-			} else {
+			case TYPE_CAS:
 				promMetrics.CASHits.Inc()
+			case TYPE_ANDROID:
+				promMetrics.AndroidHits.Inc()
 			}
 
 		// handle upload
 		case http.MethodPut:
-			// only hash CAS, not action cache
+			// only double check hash of CAS, not action cache
 			// the action cache is hash -> metadata
 			// the CAS is well, a CAS, which we can hash...
-			if requestingAction {
+			if requestingType != TYPE_CAS {
 				hash = ""
 			}
 			err := cache.Put(r.URL.Path, r.Body, hash)
