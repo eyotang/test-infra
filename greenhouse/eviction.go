@@ -50,17 +50,11 @@ func monitorDiskAndEvict(
 		// if we are past the threshold, start evicting
 		if blocksFree < minPercentBlocksFree {
 			logger.Warn("Eviction triggered")
-			// get all cache entries and sort by lastaccess
-			// so we can pop entries until we have evicted enough
-			files := c.GetEntries()
-			sort.Slice(files, func(i, j int) bool {
-				return files[i].LastAccess.Before(files[j].LastAccess)
-			})
+
 			// evict until we pass the safe threshold so we don't thrash at the eviction trigger
 			for blocksFree < evictUntilPercentBlocksFree {
-				if len(files) < 1 {
-					logger.Fatal("Failed to find entries to evict!")
-				}
+				c.EvictCache(evictUntilPercentBlocksFree)
+				/*
 				// pop entry and delete
 				var entry diskcache.EntryInfo
 				entry, files = files[0], files[1:]
@@ -71,6 +65,7 @@ func monitorDiskAndEvict(
 					promMetrics.FilesEvicted.Inc()
 					promMetrics.LastEvictedAccessAge.Set(time.Now().Sub(entry.LastAccess).Hours())
 				}
+				*/
 				// get new disk usage
 				blocksFree, _, _, err = diskutil.GetDiskUsage(diskRoot)
 				logger = logrus.WithFields(logrus.Fields{

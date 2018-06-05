@@ -36,6 +36,10 @@ import (
 	"github.com/djherbis/atime"
 )
 
+const (
+	MAX_DISK_SIZE = 5*1024*1024*1024*1024
+)
+
 // ErrTooBig is returned by Cache::Put when when the item size is bigger than the
 // cache size limit.
 type ErrTooBig struct{}
@@ -89,7 +93,7 @@ func NewCache(diskRoot string) *Cache {
 	cache := &Cache{
 		diskRoot: strings.TrimSuffix(diskRoot, string(os.PathListSeparator)),
 		mux: &sync.RWMutex{},
-		lru: NewSizedLRU(5*1024*1024*1024*1024, onEvict),
+		lru: NewSizedLRU(MAX_DISK_SIZE, onEvict),
 	}
 
 	cache.loadExistingFiles()
@@ -332,4 +336,11 @@ func (c *Cache) loadExistingFiles() {
 			committed: true,
 		})
 	}
+}
+
+func(c *Cache) EvictCache(evictUntilPercentBlocksFree float64) {
+	c.mux.Lock()
+	maxSize := (int64)(((99 - evictUntilPercentBlocksFree) * MAX_DISK_SIZE) / 100)
+	c.lru.RemoveCache(maxSize)
+	c.mux.Unlock()
 }

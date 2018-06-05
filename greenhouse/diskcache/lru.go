@@ -20,6 +20,7 @@ type SizedLRU interface {
 	Add(key Key, value SizedItem) (ok bool)
 	Get(key Key) (value SizedItem, ok bool)
 	Remove(key Key)
+	RemoveCache(maxSize int64)
 	Len() int
 	CurrentSize() int64
 	MaxSize() int64
@@ -82,6 +83,15 @@ func (c *sizedLRU) Add(key Key, value SizedItem) (ok bool) {
 	c.currentSize += sizeDelta
 
 	return true
+}
+
+func (c *sizedLRU) RemoveCache(maxSize int64) {
+	for c.currentSize > maxSize {
+		ele := c.ll.Back()
+		if ele != nil {
+			c.removeElement(ele)
+		}
+	}
 }
 
 // Get looks up a key in the cache
