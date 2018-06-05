@@ -88,8 +88,10 @@ func initMetrics() *prometheusMetrics {
 	prometheus.MustRegister(metrics.FilesEvicted)
 	prometheus.MustRegister(metrics.ActionCacheHits)
 	prometheus.MustRegister(metrics.CASHits)
+	prometheus.MustRegister(metrics.AndroidHits)
 	prometheus.MustRegister(metrics.ActionCacheMisses)
 	prometheus.MustRegister(metrics.CASMisses)
+	prometheus.MustRegister(metrics.AndroidMisses)
 	prometheus.MustRegister(metrics.LastEvictedAccessAge)
 	return metrics
 }
