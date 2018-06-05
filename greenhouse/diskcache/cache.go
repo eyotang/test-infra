@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	MAX_DISK_SIZE = 5*1024*1024*1024*1024
+	MAX_DISK_SIZE = 5*1024*1024*1024*1024 // 5TB
 )
 
 // ErrTooBig is returned by Cache::Put when when the item size is bigger than the
@@ -340,7 +340,7 @@ func (c *Cache) loadExistingFiles() {
 
 func(c *Cache) EvictCache(evictUntilPercentBlocksFree float64) {
 	c.mux.Lock()
-	maxSize := (int64)(((99 - evictUntilPercentBlocksFree) * MAX_DISK_SIZE) / 100)
+	maxSize := int64(((99 - evictUntilPercentBlocksFree) * MAX_DISK_SIZE) / 100)
 	c.lru.RemoveCache(maxSize)
 	c.mux.Unlock()
 }
