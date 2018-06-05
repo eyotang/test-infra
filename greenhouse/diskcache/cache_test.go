@@ -154,7 +154,7 @@ func TestCacheStorage(t *testing.T) {
 	}
 	expectedKeys := sets.NewString()
 	for _, tc := range testCases {
-		err := cache.Put(tc.Key, bytes.NewReader(tc.Contents), tc.Hash)
+		err := cache.Put(tc.Key, bytes.NewReader(tc.Contents), tc.Hash, int64(len(tc.Contents)))
 		if err != nil && !tc.PutShouldError {
 			t.Fatalf("Got error '%v' for test case '%s' and expected none.", err, tc.Name)
 		} else if err == nil && tc.PutShouldError {
