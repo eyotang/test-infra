@@ -134,7 +134,7 @@ func cacheHandler(cache *diskcache.Cache) http.Handler {
 		}
 		hash := parts[len(parts)-1]
 		acOrCAS := parts[len(parts)-2]
-		if acOrCAS != "ac" && acOrCAS != "cas" && acOrCAS != "android" {
+		if acOrCAS != "ac" && acOrCAS != "cas" && acOrCAS != "build-cache" {
 			logger.Warn("received an invalid request at path")
 			http.Error(w, "invalid location", http.StatusBadRequest)
 			return
@@ -145,7 +145,7 @@ func cacheHandler(cache *diskcache.Cache) http.Handler {
 			requestingType = TYPE_AC
 		case "cas":
 			requestingType = TYPE_CAS
-		case "android":
+		case "build-cache":
 			requestingType = TYPE_ANDROID
 		}
 
