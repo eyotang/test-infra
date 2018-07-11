@@ -134,7 +134,7 @@ func cacheHandler(cache *diskcache.Cache) http.Handler {
 		}
 		hash := parts[len(parts)-1]
 		acOrCAS := parts[len(parts)-2]
-		buildCache := parts[0] == "build"
+		buildCache := parts[0] == "build-cache"
 		if acOrCAS != "ac" && acOrCAS != "cas" && !buildCache {
 			logger.Warn("received an invalid request at path")
 			http.Error(w, "invalid location", http.StatusBadRequest)
