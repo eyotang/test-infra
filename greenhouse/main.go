@@ -62,10 +62,10 @@ var diskCheckInterval = flag.Duration("disk-check-interval", time.Second*10,
 
 // global const variables
 const (
-	TYPE_INVALID = 0
-	TYPE_AC = 1
-	TYPE_CAS = 2
-	TYPE_ANDROID = 3
+	TYPE_INVALID    = 0
+	TYPE_AC         = 1
+	TYPE_CAS        = 2
+	TYPE_BUILDCACHE = 3
 )
 
 // global metrics object, see prometheus.go
@@ -134,7 +134,8 @@ func cacheHandler(cache *diskcache.Cache) http.Handler {
 		}
 		hash := parts[len(parts)-1]
 		acOrCAS := parts[len(parts)-2]
-		if acOrCAS != "ac" && acOrCAS != "cas" && acOrCAS != "build-cache" {
+		buildCache := parts[0] == "build"
+		if acOrCAS != "ac" && acOrCAS != "cas" && !buildCache {
 			logger.Warn("received an invalid request at path")
 			http.Error(w, "invalid location", http.StatusBadRequest)
 			return
@@ -145,8 +146,9 @@ func cacheHandler(cache *diskcache.Cache) http.Handler {
 			requestingType = TYPE_AC
 		case "cas":
 			requestingType = TYPE_CAS
-		case "build-cache":
-			requestingType = TYPE_ANDROID
+		}
+		if buildCache {
+			requestingType = TYPE_BUILDCACHE
 		}
 
 		// actually handle request depending on method
@@ -168,7 +170,7 @@ func cacheHandler(cache *diskcache.Cache) http.Handler {
 						promMetrics.ActionCacheMisses.Inc()
 					case TYPE_CAS:
 						promMetrics.CASMisses.Inc()
-					case TYPE_ANDROID:
+					case TYPE_BUILDCACHE:
 						promMetrics.AndroidMisses.Inc()
 					}
 					http.Error(w, err.Error(), http.StatusNotFound)
@@ -185,7 +187,7 @@ func cacheHandler(cache *diskcache.Cache) http.Handler {
 				promMetrics.ActionCacheHits.Inc()
 			case TYPE_CAS:
 				promMetrics.CASHits.Inc()
-			case TYPE_ANDROID:
+			case TYPE_BUILDCACHE:
 				promMetrics.AndroidHits.Inc()
 			}
 
